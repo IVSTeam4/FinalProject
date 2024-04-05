@@ -10,7 +10,7 @@ PWM_init = 300  # angle about 90°
 PWM_Min = 100 # angle about 0°
 PWM_Max = 500  # angle about 180°
 
-Channel = 0  # PWM port number.
+Channel = 1  # PWM port number.
 
 
 # Set the value of PWM to control rotation.
@@ -25,7 +25,12 @@ def servo_angle(Channel, angle):  # The angle range is between 0-180 .
     pwm.set_pwm(Channel, 0, value)
 
 
-#if __name__ == '__main__':
+if __name__ == '__main__':
+    try:
+        while True:
+             servo_angle(1,10)
+    except:
+        pass
 #    try:
 #        while True:
 #            servo_angle(0, 0)  # Servo of port0 Rotate to 0 degrees.

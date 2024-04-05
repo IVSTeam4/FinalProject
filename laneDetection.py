@@ -12,6 +12,12 @@ def roi_for_edge(canny):
 
     # only focus bottom half of the screen
     # 0.5 ~ 1.0 for default camera
+    # polygon = np.array([[
+    #     (0, height * 0.5),
+    #     (width, height * 0.5),
+    #     (width, height * 1.0),
+    #     (0, height * 1.0),
+    # ]], np.int32)
     polygon = np.array([[
         (0, height * 0.5),
         (width, height * 0.5),
@@ -40,7 +46,7 @@ def weighted_img(img, initial_img, α=0.8, β=1., λ=0.):
     initial_img * α + img * β + λ
     """
     img = np.uint8(img)
-    if len(img.shape) is 2:
+    if len(img.shape) == 2:
         img = np.dstack((img, np.zeros_like(img), np.zeros_like(img)))
 
     return cv2.addWeighted(initial_img, α, img, β, λ)
@@ -55,7 +61,7 @@ def compute_lane_from_candidates(line_candidates, img_shape):
     :return: lines that approximate left and right lane position
     """
     # Left and Right 1/3 regision
-    boundary = 0.4
+    boundary = 0.49
     left_region_boundary = img_shape[1] * (1 - boundary)
     right_region_boundary = img_shape[1] * boundary
 
@@ -110,7 +116,7 @@ def get_lane_lines(color_image, solid_lines=True):
     img_blur = cv2.GaussianBlur(img_gray, (17, 17), 0)
 
     # perform edge detection
-    img_edge = cv2.Canny(img_blur, threshold1=50, threshold2=80)
+    img_edge = cv2.Canny(img_blur, threshold1=90, threshold2=120)
 
     mask_edge = roi_for_edge(img_edge)
 
@@ -119,7 +125,7 @@ def get_lane_lines(color_image, solid_lines=True):
                                            rho=1,
                                            theta=np.pi / 180,
                                            threshold=1,
-                                           min_line_len=20,
+                                           min_line_len=10,
                                            max_line_gap=6)
     if detected_lines is None:
         print("No detected lines")
@@ -140,12 +146,34 @@ def get_lane_lines(color_image, solid_lines=True):
         lane_lines = compute_lane_from_candidates(candidate_lines, img_gray.shape)
     else:
         # if not solid_lines, just return the hough transform output
-        lane_lines = detected_lines
+        lane_lines = detected_line    
+        
     # for l in lane_lines:
     #    print("Lane ",l.x1, l.y1, l.x2, l.y2, l.slope)
     # print(" ")
 
     return lane_lines
+
+def is_corner (line):
+    x1 = line[0].x1
+    y1 = line[0].y1
+    x2 = line[0].x2
+    y2 = line[0].y2
+    
+    # 라인의 길이 계산
+    length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+    
+    # 라인의 기울기 계산
+    if x2 - x1 != 0:
+        slope = abs((y2 - y1) / (x2 - x1))
+    else:
+        slope = float('inf')  # 수직선의 경우 기울기를 무한대로 설정
+    
+    # 기울기에 따라 corner 여부 결정
+    if slope > 5 or length < 10:  # 기울기가 매우 크거나, 라인의 길이가 매우 작으면 corner로 판단
+        return True
+    else:
+        return False
 
 
 def smoothen_over_time(lane_lines):
@@ -271,7 +299,8 @@ def compute_steering_angle(frame, lane_lines):
         mid_position_lane = int(w / 2)
         print("no lane")
         no_lines = 0
-        steering_angle = -90
+        steering_angle = 90
+        
         return frame, steering_angle, no_lines
 
     if left_YN and (not right_YN):
@@ -319,6 +348,7 @@ def compute_steering_angle(frame, lane_lines):
         angle_to_mid_deg = int(angle_to_mid_radian * 180.0 / math.pi)
         steering_angle = angle_to_mid_deg + 90
         no_lines = 1
+        
         return frame, steering_angle, no_lines
 
     # for mid-position of lanes
@@ -365,22 +395,58 @@ def img_preprocess(image):
 
 
 # show image function
-def show_image(q):
-    while True:
-        frame = q.get()
-        # Display frame
-        cv2.imshow("blend", frame)
-        q.task_done()
+# def show_image(q):
+#     while True:
+#         frame = q.get()
+#         # Display frame
+#         cv2.imshow("blend", frame)
+#         q.task_done()
+def show_image (img, results, lines, inference_sz, labels) :
+    for line in lines :
+        x1 = line.x1
+        y1 = line.y1
+        x2 = line.x2
+        y2 = line.y2
+    
+        cv2.line(img, (x1,y1), (x2,y2), (0,0,255), 2)
+    
+    h, w, c = img.shape
+    s_x, s_y = w / inference_sz[0], h / inference_sz[1]
+    
+    for result in results :
+        if result.id in [0, 2, 9, 12] :
+            '''
+            0 : person
+            1 : bicycle
+            2 : car
+            3 : motorcycle
+            9 : traffic light
+            12 : stop sign
+            14 : parking meter
+            '''
+            bbox = result.bbox.scale(s_x, s_y)
+            
+            x0, y0 = int(bbox.xmin), int(bbox.ymin)
+            x1, y1 = int(bbox.xmax), int(bbox.ymax)
+            
+            score = int(100 * result.score)
+            
+            label = '{}% {}'.format(score, labels.get(result.id, result.id))
+            
+            img = cv2.rectangle(img, (x0,y0), (x1,y1), (255,255,255), 2)
+            img = cv2.putText(img, label, (x0,y0 + 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,0,0), 2)
+    
+    return img
 
 
 # steering car function
-def steer_car(q, frames, fw, args):
+def steer_car(q, frames, args):
     img_seq = 0  # Writing image sequence
     while True:
         # Steering a car using ANGLE
         ANGLE = q.get()
         # print("Steering Angle ->", ANGLE)
-        fw.turn(ANGLE)
+        servo_angle(0,ANGLE)
         q.task_done()
 
         # if a file path is provided, write a training image
