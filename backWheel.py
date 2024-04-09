@@ -1,94 +1,196 @@
-import time
+ #!/usr/bin/env python
+'''
+**********************************************************************
+* Filename    : back_wheels.py
+* Description : A module to control the back wheels of RPi Car
+* Author      : Cavon
+* Brand       : SunFounder
+* E-mail      : service@sunfounder.com
+* Website     : www.sunfounder.com
+* Update      : Cavon    2016-09-13    New release
+*               Cavon    2016-11-04    fix for submodules
+**********************************************************************
+'''
+
+from picar import TB6612
+from picar import PCA9685
+from picar import filedb
 import RPi.GPIO as GPIO
+import time
 
+Motor_A_Pin1 = 26
+Motor_A_Pin2 = 21
 Motor_A_EN = 4
-Motor_A_Pin1 = 14
-Motor_A_Pin2 = 15
-Motor_B_EN = 17
-Motor_B_Pin1 = 27
-Motor_B_Pin2 = 18
+class Back_Wheels(object):
+	''' Back wheels control class '''
+	Motor_A = 26
+	Motor_B = 21
+
+	PWM_A = 4
+	PWM_B = 4
+
+	_DEBUG = False
+	_DEBUG_INFO = 'DEBUG "back_wheels.py":'
 
 
-pwm_A = 0
-pwm_B = 0
+	def __init__(self, debug=False, bus_number=1, db="config"):
+		''' Init the direction channel and pwm channel '''
+		self.forward_A = True
+		self.forward_B = True
 
-def motorStop():
-    GPIO.output(Motor_A_Pin1, GPIO.LOW)
-    GPIO.output(Motor_A_Pin2, GPIO.LOW)
-    GPIO.output(Motor_A_EN, GPIO.LOW)
-    GPIO.output(Motor_B_Pin1, GPIO.LOW)
-    GPIO.output(Motor_B_Pin2, GPIO.LOW)
-    GPIO.output(Motor_B_EN, GPIO.LOW)
+		self.db = filedb.fileDB(db=db)
 
-def setup():
-    global pwm_A, pwm_B
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(Motor_A_EN, GPIO.OUT)
-    GPIO.setup(Motor_B_EN, GPIO.OUT)
-    GPIO.setup(Motor_A_Pin1, GPIO.OUT)
-    GPIO.setup(Motor_A_Pin2, GPIO.OUT)
-    GPIO.setup(Motor_B_Pin1, GPIO.OUT)
-    GPIO.setup(Motor_B_Pin2, GPIO.OUT)
-    motorStop()
-    try:
-        pwm_A = GPIO.PWM(Motor_A_EN, 1000)
-        pwm_B = GPIO.PWM(Motor_B_EN, 1000)
-    except:
-        pass
+		self.forward_A = int(self.db.get('forward_A', default_value=1))
+		self.forward_B = int(self.db.get('forward_B', default_value=1))
 
-def move(speed):
-    #speed = 0~100
-    if speed < 0 and speed >= -100:
-        GPIO.output(Motor_A_Pin1, GPIO.HIGH)
-        GPIO.output(Motor_A_Pin2, GPIO.LOW)
-        GPIO.output(Motor_B_Pin1, GPIO.HIGH)
-        GPIO.output(Motor_B_Pin2, GPIO.LOW)
-        pwm_A.start(0)
-        pwm_B.start(0)
-        pwm_A.ChangeDutyCycle(-speed)
-        pwm_B.ChangeDutyCycle(-speed)
-        #GPIO.output(Motor_A_EN, GPIO.HIGH)
-        #pwm.ChangeDutyCycle(speed)
-    elif speed > 0 and speed <= 100:
-        GPIO.output(Motor_A_Pin1, GPIO.LOW)
-        GPIO.output(Motor_A_Pin2, GPIO.HIGH)
-        GPIO.output(Motor_B_Pin1, GPIO.LOW)
-        GPIO.output(Motor_B_Pin2, GPIO.HIGH)
-        pwm_A.start(100)
-        pwm_B.start(100)
-        pwm_A.ChangeDutyCycle(speed)
-        pwm_B.ChangeDutyCycle(speed)
-        #GPIO.output(Motor_A_EN, GPIO.HIGH)
-        #pwm.ChangeDutyCycle(-speed)
-    else:
-        motorStop()
+		self.left_wheel = TB6612.Motor(self.Motor_A, offset=self.forward_A)
+		self.right_wheel = TB6612.Motor(self.Motor_B, offset=self.forward_B)
 
-def destroy():
-    motorStop()
-    GPIO.cleanup()
+		self.pwm = PCA9685.PWM(bus_number=bus_number)
 
-#if __name__ == '__main__':
-#    try:
-#        while True:
-#            speed_set = 60 
-#            setup()
-            #pwm = GPIO.PWM(Motor_A_EN, 100)
-            #pwm.start(0)
+		def _set_a_pwm(value):
+			pulse_wide = self.pwm.map(value, 0, 100, 0, 4095)
+			self.pwm.write(self.PWM_A, 0, pulse_wide)
 
-#            move(100)
-#            print(speed_set)
-#            time.sleep(3) 
-#            motorStop()
+		def _set_b_pwm(value):
+			pulse_wide = self.pwm.map(value, 0, 100, 0, 4095)
+			self.pwm.write(self.PWM_B, 0, pulse_wide)
 
-            # move(0)
- #           time.sleep(0.5)
+		self.left_wheel.pwm = _set_a_pwm
+		self.right_wheel.pwm = _set_b_pwm
 
-#            move(-100)
-#            print(-100)
-#            time.sleep(3)
-#            motorStop()
+		self._speed = 0
 
-            #destroy()
- #   except KeyboardInterrupt:
- #       destroy()
+		self.debug = debug
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Set left wheel to #%d, PWM channel to %d' % (self.Motor_A, self.PWM_A))
+			print(self._DEBUG_INFO, 'Set right wheel to #%d, PWM channel to %d' % (self.Motor_B, self.PWM_B))
+
+	def forward(self):
+		''' Move both wheels forward '''
+		self.left_wheel.forward()
+		self.right_wheel.forward()
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Running forward')
+
+	def backward(self):
+		''' Move both wheels backward '''
+		self.left_wheel.backward()
+		self.right_wheel.backward()
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Running backward')
+
+	def stop(self):
+		''' Stop both wheels '''
+		self.left_wheel.stop()
+		self.right_wheel.stop()
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Stop')
+
+	@property
+	def speed(self, speed):
+		return self._speed
+
+	@speed.setter
+	def speed(self, speed):
+		self._speed = speed
+		''' Set moving speeds '''
+		self.left_wheel.speed = self._speed
+		self.right_wheel.speed = self._speed
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Set speed to', self._speed)
+
+	@property
+	def debug(self):
+		return self._DEBUG
+
+	@debug.setter
+	def debug(self, debug):
+		''' Set if debug information shows '''
+		if debug in (True, False):
+			self._DEBUG = debug
+		else:
+			raise ValueError('debug must be "True" (Set debug on) or "False" (Set debug off), not "{0}"'.format(debug))
+
+		if self._DEBUG:
+			print(self._DEBUG_INFO, "Set debug on")
+			self.left_wheel.debug = True
+			self.right_wheel.debug = True
+			self.pwm.debug = True
+		else:
+			print(self._DEBUG_INFO, "Set debug off")
+			self.left_wheel.debug = False
+			self.right_wheel.debug = False
+			self.pwm.debug = False
+
+	def ready(self):
+		''' Get the back wheels to the ready position. (stop) '''
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Turn to "Ready" position')
+		self.left_wheel.offset = self.forward_A
+		self.right_wheel.offset = self.forward_B
+		self.stop()
+
+	def calibration(self):
+		''' Get the front wheels to the calibration position. '''
+		if self._DEBUG:
+			print(self._DEBUG_INFO, 'Turn to "Calibration" position')
+		self.speed = 50
+		self.forward()
+		self.cali_forward_A = self.forward_A
+		self.cali_forward_B = self.forward_B
+
+	def cali_left(self):
+		''' Reverse the left wheels forward direction in calibration '''
+		self.cali_forward_A = (1 + self.cali_forward_A) & 1
+		self.left_wheel.offset = self.cali_forward_A
+		self.forward()
+
+	def cali_right(self):
+		''' Reverse the right wheels forward direction in calibration '''
+		self.cali_forward_B = (1 + self.cali_forward_B) & 1
+		self.right_wheel.offset = self.cali_forward_B
+		self.forward()
+
+	def cali_ok(self):
+		''' Save the calibration value '''
+		self.forward_A = self.cali_forward_A
+		self.forward_B = self.cali_forward_B
+		self.db.set('forward_A', self.forward_A)
+		self.db.set('forward_B', self.forward_B)
+		self.stop()
+
+def test():
+	import time
+	back_wheels = Back_Wheels()
+	DELAY = 0.01
+	try:
+		back_wheels.forward()
+		for i in range(0, 100):
+			back_wheels.speed = i
+			print("Forward, speed =", i)
+			time.sleep(DELAY)
+		for i in range(100, 0, -1):
+			back_wheels.speed = i
+			print("Forward, speed =", i)
+			time.sleep(DELAY)
+
+		back_wheels.backward()
+		for i in range(0, 100):
+			back_wheels.speed = i
+			print("Backward, speed =", i)
+			time.sleep(DELAY)
+		for i in range(100, 0, -1):
+			back_wheels.speed = i
+			print("Backward, speed =", i)
+			time.sleep(DELAY)
+
+	except(KeyboardInterrupt):
+		print("KeyboardInterrupt, motor stop")
+		back_wheels.stop()
+	finally:
+		print("Finished, motor stop")
+		back_wheels.stop()
+
+if __name__ == '__main__':
+	test()
